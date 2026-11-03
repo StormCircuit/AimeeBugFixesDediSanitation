@@ -2,8 +2,11 @@
 
 ## Build Configuration
 
-**Output Path**: `C:\Users\TJ\Desktop\StationeersServer\mods\Workshop_3674960841\`
+**Primary Output Path**: `$(DESKTOP)\StationeersServer\mods\Workshop_3674960841\`
+**Secondary Output Path**: `$(USERPROFILE)\Documents\My Games\Stationeers\mods\aimeeBugFixDediMod\`
 **Assembly Name**: `AimeeBugFixes.dll`
+
+Both paths use generic user environment variables, so they work on any machine.
 
 ## Building the Project
 
@@ -16,6 +19,14 @@
 ```bash
 dotnet build --configuration Release --no-restore
 ```
+
+## Output Locations
+
+After building, `AimeeBugFixes.dll` will be copied to:
+1. **Primary**: Desktop\StationeersServer\mods\Workshop_3674960841\ (hardcoded relative path)
+2. **Secondary**: Documents\My Games\Stationeers\mods\aimeeBugFixDediMod\ (generic user path)
+
+Both locations receive the same DLL file during each build.
 
 ## Important: NuGet Restore Issue
 
@@ -42,9 +53,3 @@ error : Value cannot be null. (Parameter 'path1')
 - Visual Studio 2022 or Visual Studio Code with C# extension
 - BepInEx installation at: `C:\Program Files (x86)\Steam\steamapps\common\Stationeers\BepInEx\`
 
-## Output
-
-After building successfully, the compiled DLL will be located at:
-```
-C:\Users\TJ\Desktop\StationeersServer\mods\Workshop_3674960841\AimeeBugFixes.dll
-```

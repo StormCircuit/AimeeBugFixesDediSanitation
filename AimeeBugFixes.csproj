@@ -82,6 +82,16 @@
     <Message Text="Mod copied to $(ScriptsFolder) for hot-reload (F6)" Importance="high" />
   </Target>
 
+  <!-- Copy to secondary mods location -->
+  <Target Name="CopyToModsLocation" AfterTargets="Build">
+    <PropertyGroup>
+      <SecondaryModsPath>$(USERPROFILE)\Documents\My Games\Stationeers\mods\aimeeBugFixDediMod</SecondaryModsPath>
+    </PropertyGroup>
+    <MakeDir Directories="$(SecondaryModsPath)" />
+    <Copy SourceFiles="$(OutputPath)AimeeBugFixes.dll" DestinationFolder="$(SecondaryModsPath)" />
+    <Message Text="Mod copied to $(SecondaryModsPath)" Importance="high" />
+  </Target>
+
   <!-- Package mod to SLP mods folders for release/testing -->
   <Target Name="Package">
     <PropertyGroup>
