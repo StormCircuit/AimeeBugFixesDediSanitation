@@ -5,7 +5,7 @@
     <AssemblyName>AimeeBugFixes</AssemblyName>
     <RootNamespace>AimeeBugFixes</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <OutputPath>bin\</OutputPath>
+    <OutputPath>..\..\..\..\Desktop\StationeersServer\mods\Workshop_3674960841\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <!-- Embedded PDB for all configurations - required for ScriptEngine hot-reload -->
     <DebugType>embedded</DebugType>
