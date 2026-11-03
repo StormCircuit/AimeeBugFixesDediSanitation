@@ -400,11 +400,20 @@ namespace AimeeBugFixes
 
     // =========================================================================
     // BUG 3: Tread/wheel UV animation broken on multiplayer clients
+    //
+    // Dedicated Server Fix: On dedicated servers (batch mode), velocity data
+    // synced to clients may be stale/non-zero when AIMeE stops. Added staleness
+    // check: if velocity hasn't updated for >2s, force wheels to stop (velocity
+    // likely isn't syncing). Also skip fix entirely on server side since it
+    // doesn't render.
     // =========================================================================
     public static class Bug3_WheelAnimationSyncFix
     {
         private static readonly Dictionary<int, float> _smoothVelocity = new Dictionary<int, float>();
+        private static readonly Dictionary<int, float> _lastVelocityTime = new Dictionary<int, float>();
+        private static readonly Dictionary<int, float> _lastVelocity = new Dictionary<int, float>();
         private const float RpmSmoothTime = 0.1f;
+        private const float VelocityStalenessThreshold = 2f;
 
         public static void PhysicsUpdate_Prefix(WheeledBase __instance)
         {
@@ -412,8 +421,35 @@ namespace AimeeBugFixes
 
             try
             {
+                int id = __instance.GetInstanceID();
                 Vector3 rbVel = __instance.RigidBody.velocity;
                 float velocity = rbVel.magnitude;
+
+                // Staleness check: detect if velocity data hasn't updated in a while
+                // (indicates sync failure on dedicated servers)
+                bool velocityChanged = true;
+                if (_lastVelocity.TryGetValue(id, out float lastVel))
+                {
+                    if (Mathf.Abs(velocity - lastVel) < 0.01f) // velocity unchanged (within tolerance)
+                    {
+                        float timeSinceLast = Time.time - _lastVelocityTime[id];
+                        if (timeSinceLast > VelocityStalenessThreshold)
+                        {
+                            // Velocity hasn't changed for 2+ seconds = stale data on dedicated server
+                            velocity = 0f;
+                            if (AimeeDebugOverlay.Enabled && Plugin.ShouldLog("Bug3-Stale-" + id, 5f))
+                                Plugin.Log.LogWarning(string.Format("[Bug3] Stale velocity detected on wheel #{0}: forcing stop (no update for {1:F1}s)", id, timeSinceLast));
+                        }
+                        velocityChanged = false;
+                    }
+                }
+
+                // Update velocity tracking
+                if (velocityChanged)
+                {
+                    _lastVelocity[id] = velocity;
+                    _lastVelocityTime[id] = Time.time;
+                }
 
                 if (velocity > 0.15f)
                 {
