@@ -1,8 +1,10 @@
 # Build output
 bin/
-obj/
 build_dev/
 build_release/
+# Ignore obj but allow project.assets.json
+obj/*
+!obj/project.assets.json
 *.dll
 *.pdb
 

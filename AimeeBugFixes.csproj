@@ -65,8 +65,8 @@
       <Private>false</Private>
     </Reference>
 
-    <!-- StationeersLaunchPad mod interface -->
-    <Reference Include="StationeersMods.Interface">
+    <!-- StationeersLaunchPad mod interface (optional) -->
+    <Reference Include="StationeersMods.Interface" Condition="Exists('$(StationeersPath)\BepInEx\plugins\StationeersLaunchPad\StationeersMods.Interface.dll')">
       <HintPath>$(StationeersPath)\BepInEx\plugins\StationeersLaunchPad\StationeersMods.Interface.dll</HintPath>
       <Private>false</Private>
     </Reference>
