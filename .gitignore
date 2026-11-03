@@ -21,3 +21,9 @@ About/*16-9*.png
 .vs/
 .vscode/
 *.user
+BUILD_NOTES.md
+build.bat
+global.json
+AimeeBugFixes.csproj
+.gitignore
+AimeeBugFixes.csproj
