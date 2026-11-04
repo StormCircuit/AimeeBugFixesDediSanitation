@@ -108,6 +108,11 @@ namespace AimeeBugFixes
                 AccessTools.Method(typeof(WheeledBase), "PhysicsUpdate"),
                 postfix: new HarmonyMethod(typeof(Bug3_WheelAnimationSyncFix), nameof(Bug3_WheelAnimationSyncFix.PhysicsUpdate_Postfix)));
 
+            // Bug 10: Network desync when idle — sync position when AIMeE sits still
+            TryPatch(ref success, ref fail, "Bug10-IdleSync",
+                AccessTools.Method(typeof(WheeledBase), "PhysicsUpdate"),
+                postfix: new HarmonyMethod(typeof(Bug10_IdleSyncFix), nameof(Bug10_IdleSyncFix.PhysicsUpdate_Postfix)));
+
             // Bug 4: Roam overhaul — replaces Roam() entirely with hybrid old/new flow
             // Old code: search+move+mine+drive all in one flow, AIMeE always drives
             // New code: queue-based with early-return on empty queue (AIMeE stops dead)
@@ -519,6 +524,65 @@ namespace AimeeBugFixes
     // player's rigidbody, launching them. Storage crates don't have this
     // issue because they have no WheelColliders.
     //
+    // Fix: Prefix on WheeledBase.PhysicsUpdate that disables WheelColliders
+    // and skips all wheel force application when being carried. Calls
+    // base DynamicThing.PhysicsUpdate via reflection for position tracking.
+    // =========================================================================
+    public static class Bug10_IdleSyncFix
+    {
+        private static readonly Dictionary<int, float> _lastIdleSyncTime = new Dictionary<int, float>();
+        private const float IdleVelocityThreshold = 0.05f;
+        private const float IdleSyncIntervalSeconds = 2f;
+
+        public static void PhysicsUpdate_Postfix(WheeledBase __instance)
+        {
+            // Only sync idle AIMeE on server
+            if (!(__instance is RobotMining robot) || !NetworkManager.IsServer)
+                return;
+
+            try
+            {
+                // Check if velocity is near-zero (idle)
+                float velocity = robot.RigidBody.velocity.magnitude;
+                if (velocity > IdleVelocityThreshold)
+                {
+                    _lastIdleSyncTime.Remove(robot.GetInstanceID());
+                    return;
+                }
+
+                // If idle, check if enough time passed since last sync
+                int id = robot.GetInstanceID();
+                float now = Time.time;
+
+                if (_lastIdleSyncTime.TryGetValue(id, out float lastSync))
+                {
+                    if (now - lastSync < IdleSyncIntervalSeconds)
+                        return;
+                }
+
+                _lastIdleSyncTime[id] = now;
+
+                // Send position/rotation sync for idle AIMeE
+                var msg = new Assets.Scripts.Networking.NetworkMessages.PhysicsUpdateMessage
+                {
+                    OwnerConnectionId = robot.ReferenceId,
+                    DynamicThingId = robot.ReferenceId,
+                    WorldPosition = robot.ThingTransformPosition,
+                    WorldRotation = robot.ThingTransform.rotation,
+                    Velocity = robot.RigidBody.velocity,
+                    AngularVelocity = robot.RigidBody.angularVelocity,
+                    VelocityMagnitude = robot.VelocityMagnitude,
+                    ForceUpdate = true
+                };
+
+                NetworkServer.SendToClients(msg, NetworkChannel.GeneralTraffic, -1L);
+            }
+            catch { }
+        }
+    }
+
+    // =========================================================================
+    // Bug 8: Carry collision — AIMeE ignores collisions when carried
     // Fix: Prefix on WheeledBase.PhysicsUpdate that disables WheelColliders
     // and skips all wheel force application when being carried. Calls
     // base DynamicThing.PhysicsUpdate via reflection for position tracking.
