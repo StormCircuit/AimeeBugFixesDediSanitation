@@ -18,5 +18,6 @@
 | 12 | **Ghost ore on clients** | Mined ore stays visible on clients. `TryMineServer` missing `SetDensityWorldSpace` call. |
 | 13 | **Targets underground ore** | `IsNearSurface` checks one voxel — misses cave ceilings, queues unreachable ore. |
 | 14 | **Stale mining queue** | Queue never cleared on pickup, power-on, or TargetXYZ write. Stale entries waste time and block other AIMeEs via `AllAimeeQueuedMinables`. |
+| 15 | **Network desync when idle** | Syncs position every 2 seconds when idle (velocity < 0.05) to bypass culling on distant clients. |
 
 All 14 are fixed in the [AimeeBugFixes](https://steamcommunity.com/sharedfiles/filedetails/?id=3674960841) mod (v0.15.3). Native fix recommendations in [DEVELOPER_RECOMMENDATIONS.md](DEVELOPER_RECOMMENDATIONS.md). Full analysis in [BUG_REPORT.md](BUG_REPORT.md).

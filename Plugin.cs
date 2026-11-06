@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -12,6 +12,8 @@ using Assets.Scripts.Vehicles;
 using BepInEx;
 using BepInEx.Logging;
 using HarmonyLib;
+using LaunchPadBooster;
+using LaunchPadBooster.Networking;
 using TerrainSystem;
 using UnityEngine;
 using Util;
@@ -43,6 +45,19 @@ namespace AimeeBugFixes
             Log = Logger;
             Log.LogInfo("AIMeE Bug Fixes v0.15.3 loading...");
             Log.LogInfo(string.Format("  IsBatchMode={0}, RunSimulation={1}, IsDedicated={2}", GameManager.IsBatchMode, GameManager.RunSimulation, GameManager.IsBatchMode));
+
+            // Register the custom network message for Bug 10 desync fix
+            try
+            {
+                // Create a Mod instance for the networking system
+                var bugFixMod = new LaunchPadBooster.Mod("AimeeBugFixes", "0.15.3");
+                bugFixMod.Networking.RegisterMessage<AIMeeSyncMessage>();
+                Log.LogInfo("  [Bug15] Registered AIMeeSyncMessage for network desync fix");
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning(string.Format("  [Bug15] Failed to register AIMeeSyncMessage: {0}", ex.Message));
+            }
 
             _harmony = new Harmony("com.florpydorp.aimeebugfixes");
 
@@ -108,10 +123,10 @@ namespace AimeeBugFixes
                 AccessTools.Method(typeof(WheeledBase), "PhysicsUpdate"),
                 postfix: new HarmonyMethod(typeof(Bug3_WheelAnimationSyncFix), nameof(Bug3_WheelAnimationSyncFix.PhysicsUpdate_Postfix)));
 
-            // Bug 10: Network desync when idle — sync position when AIMeE sits still
-            TryPatch(ref success, ref fail, "Bug10-IdleSync",
+            // Bug 15: Network desync when idle — sync position when AIMeE sits still
+            TryPatch(ref success, ref fail, "Bug15-IdleSync",
                 AccessTools.Method(typeof(WheeledBase), "PhysicsUpdate"),
-                postfix: new HarmonyMethod(typeof(Bug10_IdleSyncFix), nameof(Bug10_IdleSyncFix.PhysicsUpdate_Postfix)));
+                postfix: new HarmonyMethod(typeof(Bug15_IdleSyncFix), nameof(Bug15_IdleSyncFix.PhysicsUpdate_Postfix)));
 
             // Bug 4: Roam overhaul — replaces Roam() entirely with hybrid old/new flow
             // Old code: search+move+mine+drive all in one flow, AIMeE always drives
@@ -528,59 +543,6 @@ namespace AimeeBugFixes
     // and skips all wheel force application when being carried. Calls
     // base DynamicThing.PhysicsUpdate via reflection for position tracking.
     // =========================================================================
-    public static class Bug10_IdleSyncFix
-    {
-        private static readonly Dictionary<int, float> _lastIdleSyncTime = new Dictionary<int, float>();
-        private const float IdleVelocityThreshold = 0.05f;
-        private const float IdleSyncIntervalSeconds = 2f;
-
-        public static void PhysicsUpdate_Postfix(WheeledBase __instance)
-        {
-            // Only sync idle AIMeE on server
-            if (!(__instance is RobotMining robot) || !NetworkManager.IsServer)
-                return;
-
-            try
-            {
-                // Check if velocity is near-zero (idle)
-                float velocity = robot.RigidBody.velocity.magnitude;
-                if (velocity > IdleVelocityThreshold)
-                {
-                    _lastIdleSyncTime.Remove(robot.GetInstanceID());
-                    return;
-                }
-
-                // If idle, check if enough time passed since last sync
-                int id = robot.GetInstanceID();
-                float now = Time.time;
-
-                if (_lastIdleSyncTime.TryGetValue(id, out float lastSync))
-                {
-                    if (now - lastSync < IdleSyncIntervalSeconds)
-                        return;
-                }
-
-                _lastIdleSyncTime[id] = now;
-
-                // Send position/rotation sync for idle AIMeE
-                var msg = new Assets.Scripts.Networking.NetworkMessages.PhysicsUpdateMessage
-                {
-                    OwnerConnectionId = robot.ReferenceId,
-                    DynamicThingId = robot.ReferenceId,
-                    WorldPosition = robot.ThingTransformPosition,
-                    WorldRotation = robot.ThingTransform.rotation,
-                    Velocity = robot.RigidBody.velocity,
-                    AngularVelocity = robot.RigidBody.angularVelocity,
-                    VelocityMagnitude = robot.VelocityMagnitude,
-                    ForceUpdate = true
-                };
-
-                NetworkServer.SendToClients(msg, NetworkChannel.GeneralTraffic, -1L);
-            }
-            catch { }
-        }
-    }
-
     // =========================================================================
     // Bug 8: Carry collision — AIMeE ignores collisions when carried
     // Fix: Prefix on WheeledBase.PhysicsUpdate that disables WheelColliders
@@ -649,6 +611,80 @@ namespace AimeeBugFixes
             }
 
             return false; // skip WheeledBase.PhysicsUpdate entirely
+        }
+    }
+
+    // =========================================================================
+    // BUG 10: Network desync when idle — sync position when AIMeE sits still
+    //
+    // Problem: On dedicated servers, when players are far away (out of culling
+    // range), they stop receiving position updates. If AIMeE becomes idle or
+    // moves slowly, the client's cached position diverges from server reality,
+    // causing the appearance of teleportation into ground.
+    //
+    // Fix: Idle-based sync via LaunchPad Booster. See IdleVelocityThreshold and IdleSyncIntervalSeconds.
+    // (idle), send position/rotation to all clients every IdleSyncIntervalSeconds seconds to ensure
+    // distant clients stay synchronized without interference with physics.
+    // =========================================================================
+    public static class Bug15_IdleSyncFix
+    {
+        private static readonly Dictionary<int, float> _lastIdleSyncTime = new Dictionary<int, float>();
+        private const float IdleVelocityThreshold = 0.001f;
+        private const float IdleSyncIntervalSeconds = 5f;
+
+        public static void PhysicsUpdate_Postfix(WheeledBase __instance)
+        {
+            // Only sync idle AIMeE on server
+            if (!(__instance is RobotMining robot) || !NetworkManager.IsServer)
+                return;
+
+            try
+            {
+                // Check if velocity is near-zero (idle)
+                float velocity = robot.RigidBody.velocity.magnitude;
+                if (velocity > IdleVelocityThreshold)
+                {
+                    _lastIdleSyncTime.Remove(robot.GetInstanceID());
+                    return;
+                }
+
+                // If idle, check if enough time passed since last sync
+                int id = robot.GetInstanceID();
+                float now = Time.time;
+
+                if (_lastIdleSyncTime.TryGetValue(id, out float lastSync))
+                {
+                    if (now - lastSync < IdleSyncIntervalSeconds)
+                        return;
+                }
+
+                _lastIdleSyncTime[id] = now;
+
+                // Send position/rotation sync for idle AIMeE via LaunchPad Booster
+                // This bypasses culling to ensure all clients see correct position
+                try
+                {
+                    var syncMsg = new AIMeeSyncMessage
+                    {
+                        ReferenceId = robot.ReferenceId,
+                        WorldPosition = robot.ThingTransformPosition,
+                        WorldRotation = robot.ThingTransform.rotation
+                    };
+                    syncMsg.SendAll(-1); // Send to all clients
+
+                    if (AimeeDebugOverlay.Enabled && Plugin.ShouldLog("Bug15-IdleSync", 10f))
+                        Plugin.Log.LogInfo(string.Format(
+                            "[Bug15] Idle sync sent for AIMeE#{0} at pos=({1:F1},{2:F1},{3:F1})",
+                            id, robot.ThingTransformPosition.x,
+                            robot.ThingTransformPosition.y,
+                            robot.ThingTransformPosition.z));
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log.LogWarning(string.Format("[Bug15] Failed to send idle sync: {0}", ex.Message));
+                }
+            }
+            catch { }
         }
     }
 
@@ -1909,6 +1945,65 @@ namespace AimeeBugFixes
             _bgTex.SetPixels(pixels);
             _bgTex.Apply();
             return _bgTex;
+        }
+    }
+
+    // =========================================================================
+    // BUG 10 Network Message: Force position/rotation sync via LaunchPad Booster
+    // Bypasses culling to ensure all clients get Unstuck() position updates
+    // =========================================================================
+    public class AIMeeSyncMessage : INetworkMessage
+    {
+        public long ReferenceId;
+        public Vector3 WorldPosition;
+        public Quaternion WorldRotation;
+
+        public void Serialize(RocketBinaryWriter writer)
+        {
+            writer.WriteInt64(ReferenceId);
+            writer.WriteVector3(WorldPosition);
+            writer.WriteQuaternion(WorldRotation);
+        }
+
+        public void Deserialize(RocketBinaryReader reader)
+        {
+            ReferenceId = reader.ReadInt64();
+            WorldPosition = reader.ReadVector3();
+            WorldRotation = reader.ReadQuaternion();
+        }
+
+        public void Process(long clientId)
+        {
+            try
+            {
+                // Find the AIMeE by ReferenceId
+                if (NetworkManager.IsServer)
+                    return; // Server doesn't need to process its own sync
+
+                // Search all RobotMining instances for matching ReferenceId
+                var aimee = UnityEngine.Object.FindObjectsOfType<RobotMining>()
+                    .FirstOrDefault(r => r.ReferenceId == ReferenceId);
+
+                if (aimee == null)
+                {
+                    if (Plugin.ShouldLog("Bug15-SyncMsg-NotFound", 5f))
+                        Plugin.Log.LogWarning(string.Format("[Bug15] Sync message received but AIMeE not found (ReferenceId={0})", ReferenceId));
+                    return;
+                }
+
+                // Force position/rotation update only (don't override velocity to avoid interfering with physics)
+                aimee.ThingTransform.position = WorldPosition;
+                aimee.ThingTransform.rotation = WorldRotation;
+
+                if (Plugin.ShouldLog("Bug15-SyncMsg-Apply", 10f))
+                    Plugin.Log.LogInfo(string.Format(
+                        "[Bug15] Position sync applied to AIMeE#{0}: pos=({1:F1},{2:F1},{3:F1})",
+                        aimee.GetInstanceID(), WorldPosition.x, WorldPosition.y, WorldPosition.z));
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogError(string.Format("[Bug15] AIMeeSyncMessage.Process error: {0}", ex.Message));
+            }
         }
     }
 }
